@@ -50,6 +50,9 @@ echo "==> Устанавливаю зависимости"
 
 # ---------- конфиги ----------
 mkdir -p "$PROJECT_DIR/data"
+# Папка data должна принадлежать тому пользователю, от которого запускается нода,
+# а не root — иначе systemd-сервис не сможет создать файлы внутри
+chown -R "$RUN_USER" "$PROJECT_DIR/data" 2>/dev/null || true
 
 if [ ! -f "$PROJECT_DIR/peers.json" ]; then
   cp "$PROJECT_DIR/peers.json.example" "$PROJECT_DIR/peers.json"
