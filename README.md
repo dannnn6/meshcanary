@@ -1,6 +1,6 @@
 # Mesh Canary
 
-[Страница проекта](https://dannnn6.github.io/meshcanary/) · MIT license
+[Страница проекта](https://YOUR_USERNAME.github.io/meshcanary/) · MIT license
 
 Распределённая, не имеющая единого центра сеть для мониторинга доступности
 сайтов. Идея: вместо одного сервера, который проверяет «доступен ли сайт X»
@@ -105,6 +105,17 @@ python3 node.py --port 9003 --id-file demo/c.key --db demo/c.db \
    сайтов для проверки) — либо синхронизируй его вручную, либо просто
    договоритесь о списке.
 
+## Автозапуск и фоновый режим (systemd)
+
+`install.sh` автоматически регистрирует systemd-сервис, если запущен через `sudo`.
+Нода стартует в фоне сразу после установки и поднимается при каждой перезагрузке сервера.
+
+```bash
+journalctl -u meshcanary -f          # логи в реальном времени
+sudo systemctl restart meshcanary    # перезапустить (запускай после update.sh)
+sudo systemctl stop meshcanary       # остановить
+```
+
 ## Обновление
 
 ```bash
@@ -169,7 +180,6 @@ git — это копии `targets.json.example` / `peers.json.example`,
 meshcanary/
 ├── node.py              узел: пробы, gossip-сервер/клиент, дашборд
 ├── install.sh            установка (venv + зависимости + run-node.sh)
-├── update.sh              самообновление через git (diff + версии + подтверждение)
 ├── VERSION                текущая версия (semver)
 ├── targets.json.example   шаблон списка целей для проверки
 ├── peers.json.example     шаблон bootstrap-списка пиров
