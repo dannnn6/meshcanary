@@ -1,0 +1,24 @@
+# Personal config (generated from .example templates by install.sh)
+/targets.json
+/peers.json
+
+# Identity keys — never commit these, they ARE the node's identity
+*.key
+demo/*.key
+
+# Local databases (report history)
+*.db
+*.db-journal
+demo/*.db
+
+# Local run artifacts
+demo/log_*.txt
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS noise
+.DS_Store

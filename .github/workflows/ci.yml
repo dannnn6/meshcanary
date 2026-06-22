@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install cryptography
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile node.py
+          python -m py_compile common/*.py
+
+      - name: Run a node for a few seconds as a smoke test
+        run: |
+          echo '{"targets": ["github.com"]}' > /tmp/targets.json
+          echo '{"peers": []}' > /tmp/peers.json
+          timeout 10s python node.py \
+            --port 19001 \
+            --id-file /tmp/ci.key \
+            --db /tmp/ci.db \
+            --targets /tmp/targets.json \
+            --peers /tmp/peers.json \
+            --probe-interval 3 \
+            --status-interval 5 || true
+          test -f /tmp/ci.db

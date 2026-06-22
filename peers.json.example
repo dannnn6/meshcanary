@@ -1,0 +1,5 @@
+{
+  "peers": [
+    {"host": "example.your-friend.net", "port": 9001}
+  ]
+}

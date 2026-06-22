@@ -1,0 +1,7 @@
+{
+  "targets": [
+    "github.com",
+    "pypi.org",
+    "this-domain-should-not-exist-meshcanary-test.invalid"
+  ]
+}

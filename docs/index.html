@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh Canary — a leaderless network that watches the internet stay open</title>
+<meta name="description" content="Mesh Canary is a serverless network of volunteer nodes that test site reachability, sign their results, and gossip them to each other. No central server to block, breach, or subpoena.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #15130F;
+    --surface: #1C1914;
+    --border: #332C20;
+    --text: #EDE8DD;
+    --text-dim: #A39B8A;
+    --amber: #E8A33D;
+    --amber-dim: #4A3A1E;
+    --safe: #4FA37C;
+    --alert: #C1503A;
+    --serif: 'IBM Plex Serif', Georgia, serif;
+    --sans: 'IBM Plex Sans', system-ui, sans-serif;
+    --mono: 'IBM Plex Mono', 'SF Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+  }
+  a { color: var(--amber); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- header ---------- */
+  header { padding: 28px 0 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  nav { display: flex; justify-content: space-between; align-items: center; }
+  nav .brand { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  nav a.gh { font-family: var(--mono); font-size: 13px; color: var(--text-dim); text-decoration: none; border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; }
+  nav a.gh:hover { border-color: var(--amber); color: var(--amber); }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 64px 0 56px; }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.18;
+    margin: 18px 0 18px;
+    max-width: 11.5em;
+  }
+  .lede { font-size: 17px; color: var(--text-dim); max-width: 38em; margin: 0 0 32px; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 56px; }
+  .btn {
+    font-family: var(--mono);
+    font-size: 13px;
+    text-decoration: none;
+    padding: 11px 18px;
+    border-radius: 7px;
+    display: inline-block;
+  }
+  .btn-primary { background: var(--amber); color: #1A1407; font-weight: 500; }
+  .btn-ghost { border: 1px solid var(--border); color: var(--text); }
+  .btn-ghost:hover { border-color: var(--text-dim); color: var(--text); }
+
+  /* signal mock: the signature element */
+  .signal-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .signal-panel .panel-label {
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: .1em; margin-bottom: 14px;
+  }
+  .signal-row {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 13px;
+    padding: 7px 0; border-top: 1px solid var(--border);
+  }
+  .signal-row:first-of-type { border-top: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.on { background: var(--safe); box-shadow: 0 0 0 0 rgba(79,163,124,.5); }
+  .dot.alert { background: var(--alert); }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot.on { animation: glow 2.6s ease-in-out infinite; }
+  }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(79,163,124,.45); }
+    50% { box-shadow: 0 0 0 6px rgba(79,163,124,0); }
+  }
+  .signal-target { flex: 1; color: var(--text); }
+  .signal-status { color: var(--text-dim); }
+  .signal-status.alert-text { color: var(--alert); }
+
+  /* ---------- sections ---------- */
+  section { padding: 44px 0; border-top: 1px solid var(--border); }
+  h2 {
+    font-family: var(--serif); font-weight: 500; font-size: 24px;
+    margin: 0 0 28px;
+  }
+  p { color: var(--text-dim); }
+  p.lead-p { color: var(--text); }
+
+  .steps { display: grid; gap: 22px; }
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 16px; }
+  .step .n {
+    font-family: var(--mono); font-size: 13px; color: var(--amber);
+    border: 1px solid var(--amber-dim); border-radius: 50%;
+    width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  }
+  .step h3 { font-family: var(--sans); font-weight: 500; font-size: 16px; margin: 0 0 4px; color: var(--text); }
+  .step p { margin: 0; font-size: 14.5px; }
+
+  .why-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 640px) { .why-grid { grid-template-columns: 1fr; } }
+  .why-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .why-card .label { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+  .why-card.bad .label { color: var(--alert); }
+  .why-card.good .label { color: var(--safe); }
+  .why-card p { margin: 0; font-size: 14.5px; }
+
+  .install-block { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .install-block code {
+    display: block; font-family: var(--mono); font-size: 13.5px; color: var(--text);
+    overflow-x: auto; white-space: pre;
+  }
+
+  footer { padding: 36px 0 56px; }
+  footer p { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
+  footer a { color: var(--text-dim); }
+  footer a:hover { color: var(--amber); }
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <nav>
+    <span class="brand">mesh canary</span>
+    <a class="gh" href="https://github.com/YOUR_USERNAME/meshcanary">github ↗</a>
+  </nav>
+</header>
+
+<div class="wrap hero">
+  <div class="eyebrow">leaderless availability monitoring</div>
+  <h1>One canary can be wrong.<br>A hundred of them can&rsquo;t be silenced.</h1>
+  <p class="lede">
+    Mesh Canary is a network of independent, volunteer-run nodes that each test
+    whether sites are reachable, sign every result with their own key, and pass
+    it on to their neighbors. There is no central server holding the data —
+    so there is nothing for anyone to pressure, breach, or take down.
+  </p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="https://github.com/YOUR_USERNAME/meshcanary">view the code</a>
+    <a class="btn btn-ghost" href="https://github.com/YOUR_USERNAME/meshcanary#readme">read the docs</a>
+  </div>
+
+  <div class="signal-panel">
+    <div class="panel-label">what a node sees, right now</div>
+    <div class="signal-row"><span class="dot on"></span><span class="signal-target">wikipedia.org</span><span class="signal-status">12/12 nodes — OK</span></div>
+    <div class="signal-row"><span class="dot on"></span><span class="signal-target">github.com</span><span class="signal-status">12/12 nodes — OK</span></div>
+    <div class="signal-row"><span class="dot alert"></span><span class="signal-target">news-mirror.example</span><span class="signal-status alert-text">3/12 nodes — TLS_FAIL</span></div>
+  </div>
+</div>
+
+<section class="wrap">
+  <h2>How a report travels</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="n">1</div>
+      <div>
+        <h3>Probe</h3>
+        <p>Each node resolves DNS, opens a TCP connection, and completes a TLS
+        handshake against a target — the same three layers censorship usually
+        breaks one of.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="n">2</div>
+      <div>
+        <h3>Sign</h3>
+        <p>The result is signed with the node's own Ed25519 key. A node's
+        identity <em>is</em> its public key — no registry, no account, nothing
+        to revoke.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="n">3</div>
+      <div>
+        <h3>Gossip</h3>
+        <p>Signed reports — and addresses of other nodes — pass from neighbor
+        to neighbor until the whole network converges on the same picture.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Why not just run one good server</h2>
+  <div class="why-grid">
+    <div class="why-card bad">
+      <div class="label">one server</div>
+      <p>Has one IP to block, one operator to pressure, one database to
+      subpoena, and one outage that takes the whole picture down with it.</p>
+    </div>
+    <div class="why-card good">
+      <div class="label">a mesh of nodes</div>
+      <p>Every report is independently signed and independently verifiable.
+      Removing any one node — or a hundred of them — doesn't change what the
+      rest already know.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Run a node</h2>
+  <p class="lead-p">One command sets up a virtual environment, installs the one
+  dependency, and gives you a wrapper script to start watching.</p>
+  <div class="install-block">
+    <code>git clone https://github.com/YOUR_USERNAME/meshcanary.git
+cd meshcanary
+./install.sh
+./run-node.sh</code>
+  </div>
+  <p style="margin-top:14px">Dashboard lands at <code style="font-family:var(--mono)">http://localhost:8080</code>.
+  Full setup, including how to connect to other people's nodes, is in the
+  <a href="https://github.com/YOUR_USERNAME/meshcanary#readme">README</a>.</p>
+</section>
+
+<footer class="wrap">
+  <p>MIT licensed · <a href="https://github.com/YOUR_USERNAME/meshcanary">source on GitHub</a></p>
+</footer>
+
+</body>
+</html>
