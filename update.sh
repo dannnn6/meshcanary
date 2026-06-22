@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Mesh Canary self-updater.
-#
-# Fetches the latest commits from the git remote, shows exactly what would
-# change (version, commit log, full diff), and applies the update only
-# after you confirm. Never overwrites uncommitted local changes — it will
-# refuse and tell you to stash them first.
+# Mesh Canary — обновление.
+# Запускай как: bash update.sh  (chmod не нужен)
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
+# Выставляем права исполнения на себя и install.sh
+chmod +x "$DIR/update.sh" "$DIR/install.sh" 2>/dev/null || true
+
 if [ ! -d .git ]; then
   echo "Ошибка: это не git-копия Mesh Canary." >&2
-  echo "Обновлятор работает только если проект склонирован через 'git clone'." >&2
+  echo "Обновление работает только если проект установлен через git clone." >&2
   exit 1
 fi
 
@@ -43,12 +42,11 @@ echo
 echo "----- что изменится (diff) -----"
 git --no-pager diff --stat HEAD "origin/$BRANCH"
 echo
-git --no-pager diff HEAD "origin/$BRANCH" -- node.py common/ install.sh VERSION
+git --no-pager diff HEAD "origin/$BRANCH" -- node.py common/ install.sh update.sh VERSION
 echo
 
 if [ -n "$(git status --porcelain)" ]; then
-  echo "Внимание: у тебя есть несохранённые локальные изменения в репозитории." >&2
-  echo "Обновление через fast-forward может с ними конфликтовать." >&2
+  echo "Внимание: есть несохранённые локальные изменения." >&2
   echo "Сохрани их (git stash) и запусти update.sh снова." >&2
   exit 1
 fi
@@ -57,8 +55,17 @@ read -r -p "Применить обновление? [y/N] " ANSWER
 case "$ANSWER" in
   [yY]|[yY][eE][sS])
     git merge --ff-only "origin/$BRANCH"
+    # Восстанавливаем права после merge
+    chmod +x "$DIR/install.sh" "$DIR/update.sh" 2>/dev/null || true
     echo "==> Обновлено: $CURRENT_VERSION -> $NEW_VERSION"
-    echo "==> Если менялись node.py / common/ — на всякий случай пересоздай venv: ./install.sh"
+    echo
+    echo "==> Применяю обновление (перезапуск ноды)..."
+    if [ -d /run/systemd/system ] && systemctl is-active --quiet meshcanary 2>/dev/null; then
+      sudo systemctl restart meshcanary
+      echo "==> Нода перезапущена через systemd."
+    else
+      echo "==> Перезапусти ноду вручную: sudo bash install.sh"
+    fi
     ;;
   *)
     echo "==> Отменено, ничего не изменилось."
