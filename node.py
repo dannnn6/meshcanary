@@ -259,6 +259,8 @@ def main():
                          help="адрес, по которому другие узлы могут достучаться до этого узла "
                               "(нужен, чтобы тебя нашли через peer exchange; для локального теста — 127.0.0.1)")
     parser.add_argument("--web-port", type=int, default=None, help="порт веб-дашборда (если не указан — дашборд выключен)")
+    parser.add_argument("--web-host", default="127.0.0.1", help="хост дашборда (127.0.0.1 / 0.0.0.0 / локальный IP)")
+    parser.add_argument("--grey-ip", action="store_true", help="режим серого IP: только исходящие gossip-соединения, входящие не принимаются")
     args = parser.parse_args()
 
     if args.advertise_host:
@@ -278,7 +280,10 @@ def main():
         with open(args.peers) as f:
             bootstrap_peers = json.load(f).get("peers", [])
 
-    threading.Thread(target=gossip_server, args=(args.port,), daemon=True).start()
+    if not args.grey_ip:
+        threading.Thread(target=gossip_server, args=(args.port,), daemon=True).start()
+    else:
+        log("режим outbound (серый IP): gossip-сервер не запущен, только исходящие соединения")
     threading.Thread(
         target=gossip_client_loop, args=(bootstrap_peers, args.gossip_interval), daemon=True
     ).start()
@@ -286,8 +291,9 @@ def main():
     threading.Thread(target=prune_loop, args=(args.retention_days,), daemon=True).start()
 
     if args.web_port:
-        dashboard.start(args.web_port, node_id)
-        log(f"веб-дашборд: http://localhost:{args.web_port}")
+        nodes_file = os.path.join(os.path.dirname(args.db), "dashboard_nodes.json")
+        dashboard.start(args.web_port, args.web_host, node_id, nodes_file)
+        log(f"веб-дашборд: http://{args.web_host}:{args.web_port}")
 
     probe_loop(node_id, priv, targets, args.probe_interval)
 

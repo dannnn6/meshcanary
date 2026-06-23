@@ -1,39 +1,32 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
+      - name: Install deps
         run: pip install cryptography
-
-      - name: Check Python syntax
+      - name: Syntax check
+        run: python -m py_compile node.py common/*.py
+      - name: Smoke test (full mode)
         run: |
-          python -m py_compile node.py
-          python -m py_compile common/*.py
-
-      - name: Run a node for a few seconds as a smoke test
-        run: |
-          echo '{"targets": ["github.com"]}' > /tmp/targets.json
-          echo '{"peers": []}' > /tmp/peers.json
-          timeout 10s python node.py \
-            --port 19001 \
-            --id-file /tmp/ci.key \
-            --db /tmp/ci.db \
-            --targets /tmp/targets.json \
-            --peers /tmp/peers.json \
-            --probe-interval 3 \
-            --status-interval 5 || true
+          echo '{"targets":["github.com"]}' > /tmp/t.json
+          echo '{"peers":[]}' > /tmp/p.json
+          timeout 10s python node.py --port 19001 --id-file /tmp/ci.key --db /tmp/ci.db \
+            --targets /tmp/t.json --peers /tmp/p.json \
+            --web-host 127.0.0.1 --web-port 19080 \
+            --probe-interval 3 --status-interval 99 || true
           test -f /tmp/ci.db
+      - name: Smoke test (grey-ip mode)
+        run: |
+          timeout 5s python node.py --port 19002 --id-file /tmp/ci2.key --db /tmp/ci2.db \
+            --targets /tmp/t.json --peers /tmp/p.json --grey-ip \
+            --probe-interval 99 --status-interval 99 || true

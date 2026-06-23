@@ -1,104 +1,168 @@
 #!/usr/bin/env bash
-# Mesh Canary — установщик.
-# Запускай как: bash install.sh  (chmod не нужен)
+# Mesh Canary — установщик. Запускай: sudo bash install.sh
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$PROJECT_DIR/.venv"
-SERVICE_NAME="meshcanary"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-
-# Сразу выставляем права исполнения себе и update.sh — чтобы больше не было Permission denied
-chmod +x "$PROJECT_DIR/install.sh" "$PROJECT_DIR/update.sh" 2>/dev/null || true
-
-# Определяем пользователя (sudo сохраняет SUDO_USER)
-if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-  RUN_USER="${SUDO_USER:-root}"
-else
-  RUN_USER="$(whoami)"
-fi
-
-echo "==> Mesh Canary installer"
-
-# ---------- Python ----------
-if ! command -v python3 &>/dev/null; then
-  echo "Ошибка: python3 не найден. Установи Python 3.9+ и повтори." >&2
-  exit 1
-fi
-PYVER="$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')"
-echo "==> Python $PYVER найден"
-
-# Автоматически ставим python3-venv если он отсутствует
-if ! python3 -m venv --help &>/dev/null 2>&1; then
-  echo "==> python3-venv не найден, устанавливаю..."
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo "    Нужны права sudo для установки python3-venv."
-    echo "    Перезапусти: sudo bash install.sh"
-    exit 1
-  fi
-  apt-get install -y "python3${PYVER:+${PYVER/#/-}}-venv" 2>/dev/null || \
-  apt-get install -y python3-venv
-  echo "==> python3-venv установлен"
-fi
-
-echo "==> Создаю виртуальное окружение (.venv)"
-python3 -m venv "$VENV_DIR"
-
-echo "==> Устанавливаю зависимости"
-"$VENV_DIR/bin/pip" install --upgrade pip --quiet
-"$VENV_DIR/bin/pip" install cryptography --quiet
-
-# ---------- конфиги ----------
-mkdir -p "$PROJECT_DIR/data"
-# Папка data должна принадлежать тому пользователю, от которого запускается нода,
-# а не root — иначе systemd-сервис не сможет создать файлы внутри
-chown -R "$RUN_USER" "$PROJECT_DIR/data" 2>/dev/null || true
-
-if [ ! -f "$PROJECT_DIR/peers.json" ]; then
-  cp "$PROJECT_DIR/peers.json.example" "$PROJECT_DIR/peers.json"
-  echo "==> Создан peers.json из шаблона"
-fi
-
-if [ ! -f "$PROJECT_DIR/targets.json" ]; then
-  cp "$PROJECT_DIR/targets.json.example" "$PROJECT_DIR/targets.json"
-  echo "==> Создан targets.json из шаблона"
-fi
-
-# ---------- run-node.sh ----------
-cat > "$PROJECT_DIR/run-node.sh" << 'RUNNER'
-#!/usr/bin/env bash
-# Сгенерирован install.sh. Переменные для настройки:
-#   MESHCANARY_PORT           порт gossip-сервера   (по умолчанию 9001)
-#   MESHCANARY_WEB_PORT       порт веб-дашборда     (по умолчанию 8080)
-#   MESHCANARY_ADVERTISE_HOST публичный IP/домен    (необязательно)
-set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV="$DIR/.venv"
+CONFIG="$DIR/data/config.env"
+SERVICE="meshcanary"
+SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
+
+chmod +x "$DIR/install.sh" "$DIR/update.sh" "$DIR/config.sh" 2>/dev/null || true
+
+IS_ROOT=$([ "${EUID:-$(id -u)}" -eq 0 ] && echo true || echo false)
+RUN_USER=$( $IS_ROOT && echo "${SUDO_USER:-root}" || whoami )
+
+# ─── Python ───────────────────────────────────────────────────────────────
+echo "==> Mesh Canary installer"
+command -v python3 &>/dev/null || { echo "Ошибка: python3 не найден."; exit 1; }
+PYVER=$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')
+echo "==> Python $PYVER"
+
+if ! python3 -m venv --help &>/dev/null 2>&1; then
+  echo "==> Устанавливаю python3-venv..."
+  $IS_ROOT || { echo "Нужен sudo: sudo bash install.sh"; exit 1; }
+  VENV_PKG="python${PYVER}-venv"
+  apt-get install -y "$VENV_PKG" 2>/dev/null || apt-get install -y python3-venv
+fi
+
+echo "==> Создаю .venv"
+python3 -m venv "$VENV"
+"$VENV/bin/pip" install --upgrade pip --quiet
+"$VENV/bin/pip" install cryptography --quiet
+
+# ─── данные ───────────────────────────────────────────────────────────────
+mkdir -p "$DIR/data"
+$IS_ROOT && chown -R "$RUN_USER" "$DIR/data" 2>/dev/null || true
+
+[ -f "$DIR/peers.json" ]   || cp "$DIR/peers.json.example"   "$DIR/peers.json"
+[ -f "$DIR/targets.json" ] || cp "$DIR/targets.json.example" "$DIR/targets.json"
+
+# ─── конфиг ───────────────────────────────────────────────────────────────
+# Значения по умолчанию
+MC_PORT=9001
+MC_WEB_PORT=8080
+MC_WEB_HOST=127.0.0.1
+MC_ADVERTISE=""
+MC_MODE=full
+MC_PROBE=30
+MC_GOSSIP=15
+MC_RETAIN=45
+
+# Подгружаем существующий конфиг (переустановка не сбросит настройки)
+if [ -f "$CONFIG" ]; then
+  source "$CONFIG"
+  MC_PORT="${MESHCANARY_PORT:-$MC_PORT}"
+  MC_WEB_PORT="${MESHCANARY_WEB_PORT:-$MC_WEB_PORT}"
+  MC_WEB_HOST="${MESHCANARY_WEB_HOST:-$MC_WEB_HOST}"
+  MC_ADVERTISE="${MESHCANARY_ADVERTISE_HOST:-}"
+  MC_MODE="${MESHCANARY_MODE:-$MC_MODE}"
+  MC_PROBE="${MESHCANARY_PROBE_INTERVAL:-$MC_PROBE}"
+  MC_GOSSIP="${MESHCANARY_GOSSIP_INTERVAL:-$MC_GOSSIP}"
+  MC_RETAIN="${MESHCANARY_RETENTION_DAYS:-$MC_RETAIN}"
+  echo "==> Существующий конфиг найден, настройки сохранены"
+else
+  echo
+  echo "==> Первичная настройка (Enter = оставить значение по умолчанию)"
+  echo
+
+  # Порт gossip
+  read -r -p "   Порт gossip-сервера [$MC_PORT]: " V; MC_PORT="${V:-$MC_PORT}"
+
+  # Режим ноды
+  echo "   Режим ноды:"
+  echo "     [1] full     — есть публичный IP (полноценная нода)"
+  echo "     [2] outbound — серый IP / за NAT (только исходящие соединения)"
+  read -r -p "   → [1]: " V
+  [ "${V:-1}" = "2" ] && MC_MODE="outbound" || MC_MODE="full"
+
+  if [ "$MC_MODE" = "full" ]; then
+    read -r -p "   Публичный адрес для peer exchange (IP или домен, Enter = пропустить): " MC_ADVERTISE
+  fi
+
+  # Хост дашборда
+  echo "   Дашборд доступен:"
+  echo "     [1] Только локально — 127.0.0.1 (рекомендуется)"
+  echo "     [2] В локальной сети (определить автоматически)"
+  echo "     [3] Везде — 0.0.0.0"
+  read -r -p "   → [1]: " WH_CHOICE
+  case "${WH_CHOICE:-1}" in
+    2)
+      DETECTED=$(python3 -c "
+import socket
+ips=set()
+try:
+  for i in socket.getaddrinfo(socket.gethostname(),None):
+    ip=i[4][0]
+    if ':' not in ip and not ip.startswith('127.'): ips.add(ip)
+except: pass
+try:
+  s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+  s.connect(('8.8.8.8',80)); ips.add(s.getsockname()[0]); s.close()
+except: pass
+print('\n'.join(sorted(ips)))" 2>/dev/null)
+      if [ -z "$DETECTED" ]; then
+        read -r -p "   Не удалось определить. Введи IP вручную: " MC_WEB_HOST
+      else
+        echo "   Обнаруженные локальные IP:"
+        mapfile -t IPS <<< "$DETECTED"
+        for i in "${!IPS[@]}"; do echo "     [$((i+1))] ${IPS[$i]}"; done
+        read -r -p "   Выбери номер [1]: " N
+        MC_WEB_HOST="${IPS[$(( ${N:-1} - 1 ))]:-127.0.0.1}"
+      fi ;;
+    3) MC_WEB_HOST="0.0.0.0" ;;
+    *) MC_WEB_HOST="127.0.0.1" ;;
+  esac
+
+  read -r -p "   Порт дашборда [$MC_WEB_PORT]: " V; MC_WEB_PORT="${V:-$MC_WEB_PORT}"
+fi
+
+# Пишем config.env
+cat > "$CONFIG" << ENV
+MESHCANARY_PORT=$MC_PORT
+MESHCANARY_WEB_PORT=$MC_WEB_PORT
+MESHCANARY_WEB_HOST=$MC_WEB_HOST
+MESHCANARY_ADVERTISE_HOST=$MC_ADVERTISE
+MESHCANARY_MODE=$MC_MODE
+MESHCANARY_PROBE_INTERVAL=$MC_PROBE
+MESHCANARY_GOSSIP_INTERVAL=$MC_GOSSIP
+MESHCANARY_RETENTION_DAYS=$MC_RETAIN
+ENV
+$IS_ROOT && chown "$RUN_USER" "$CONFIG" 2>/dev/null || true
+echo "==> Конфиг записан: $CONFIG"
+
+# ─── run-node.sh ──────────────────────────────────────────────────────────
+cat > "$DIR/run-node.sh" << 'RUNNER'
+#!/usr/bin/env bash
+set -euo pipefail
+D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$D/data/config.env" ] && source "$D/data/config.env"
 
 ARGS=(
   --port    "${MESHCANARY_PORT:-9001}"
-  --id-file "$DIR/data/node.key"
-  --db      "$DIR/data/node.db"
-  --targets "$DIR/targets.json"
-  --peers   "$DIR/peers.json"
-  --web-port "${MESHCANARY_WEB_PORT:-8080}"
+  --id-file "$D/data/node.key"
+  --db      "$D/data/node.db"
+  --targets "$D/targets.json"
+  --peers   "$D/peers.json"
+  --web-host  "${MESHCANARY_WEB_HOST:-127.0.0.1}"
+  --web-port  "${MESHCANARY_WEB_PORT:-8080}"
+  --probe-interval  "${MESHCANARY_PROBE_INTERVAL:-30}"
+  --gossip-interval "${MESHCANARY_GOSSIP_INTERVAL:-15}"
+  --retention-days  "${MESHCANARY_RETENTION_DAYS:-45}"
 )
+[ "${MESHCANARY_MODE:-full}" = "outbound" ] && ARGS+=(--grey-ip)
+[ -n "${MESHCANARY_ADVERTISE_HOST:-}" ]     && ARGS+=(--advertise-host "$MESHCANARY_ADVERTISE_HOST")
 
-[ -n "${MESHCANARY_ADVERTISE_HOST:-}" ] && ARGS+=(--advertise-host "$MESHCANARY_ADVERTISE_HOST")
-
-exec "$DIR/.venv/bin/python3" "$DIR/node.py" "${ARGS[@]}" "$@"
+exec "$D/.venv/bin/python3" "$D/node.py" "${ARGS[@]}" "$@"
 RUNNER
-chmod +x "$PROJECT_DIR/run-node.sh"
+chmod +x "$DIR/run-node.sh"
 
-# ---------- systemd ----------
+# ─── systemd ──────────────────────────────────────────────────────────────
 if [ -d /run/systemd/system ]; then
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo
-    echo "==> Для регистрации systemd-сервиса нужны права sudo."
-    echo "    Перезапусти: sudo bash install.sh"
-    echo "    Или запусти вручную: ./run-node.sh"
+  if ! $IS_ROOT; then
+    echo; echo "==> Для systemd-сервиса нужен sudo: sudo bash install.sh"
   else
     echo "==> Регистрирую systemd-сервис (пользователь: $RUN_USER)"
-
     cat > "$SERVICE_FILE" << UNIT
 [Unit]
 Description=Mesh Canary Node
@@ -108,8 +172,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=${RUN_USER}
-WorkingDirectory=${PROJECT_DIR}
-ExecStart=${PROJECT_DIR}/run-node.sh
+WorkingDirectory=${DIR}
+ExecStart=${DIR}/run-node.sh
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -118,25 +182,21 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 UNIT
-
     systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME" --quiet
-    systemctl restart "$SERVICE_NAME"
-
+    systemctl enable "$SERVICE" --quiet
+    systemctl restart "$SERVICE"
     sleep 2
-    echo "==> Статус:"
-    systemctl status "$SERVICE_NAME" --no-pager -l
-
+    systemctl status "$SERVICE" --no-pager -l
     echo
-    echo "==> Нода запущена в фоне и стартует при каждой перезагрузке."
-    echo "    Логи:       journalctl -u $SERVICE_NAME -f"
-    echo "    Стоп:       sudo systemctl stop $SERVICE_NAME"
-    echo "    Рестарт:    sudo systemctl restart $SERVICE_NAME"
+    echo "==> Нода запущена в фоне."
+    echo "    Логи:        journalctl -u $SERVICE -f"
+    echo "    Настройки:   bash config.sh"
+    echo "    Обновление:  bash update.sh"
   fi
 else
-  echo "==> systemd не найден — запускай вручную: ./run-node.sh"
+  echo "==> systemd не найден. Запускай: ./run-node.sh"
 fi
 
 echo
-echo "==> Готово. Впиши bootstrap-пиров в peers.json если нужно."
-echo "    Дашборд: http://localhost:8080"
+echo "==> Дашборд: http://${MC_WEB_HOST}:${MC_WEB_PORT}"
+echo "==> Готово."
