@@ -37,14 +37,11 @@ echo "--- изменённые файлы ---"
 git --no-pager diff --stat HEAD "origin/$BRANCH"
 echo
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Есть несохранённые изменения. Выполни git stash и повтори." >&2; exit 1
-fi
-
 read -r -p "Применить обновление? [y/N] " ANS
 case "$ANS" in [yY]*)
   git merge --ff-only "origin/$BRANCH"
   chmod +x "$DIR/install.sh" "$DIR/update.sh" "$DIR/config.sh" 2>/dev/null || true
+
   echo "==> Обновлено: $CURRENT_VERSION → $NEW_VERSION"
   if [ -d /run/systemd/system ] && systemctl is-active --quiet meshcanary 2>/dev/null; then
     sudo systemctl restart meshcanary && echo "==> Нода перезапущена."
