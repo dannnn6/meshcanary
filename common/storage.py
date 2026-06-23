@@ -153,3 +153,94 @@ def known_peers() -> list:
         cur = _CONN.execute("SELECT host, port FROM peers ORDER BY last_seen DESC")
         rows = cur.fetchall()
     return [{"host": h, "port": p} for h, p in rows]
+
+
+def get_target_reports(target: str, limit: int = 50, offset: int = 0) -> list:
+    """Recent reports for a specific target, newest first."""
+    with _LOCK:
+        cur = _CONN.execute(
+            "SELECT sig, node_id, target, timestamp, status, latency_ms "
+            "FROM reports WHERE target = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            (target, limit, offset),
+        )
+        return [_row_to_report(r) for r in cur.fetchall()]
+
+
+def get_target_stats(target: str, hours: int = 24) -> dict:
+    """Uptime summary for a target over the last N hours."""
+    cutoff = _iso_cutoff(hours * 3600)
+    with _LOCK:
+        cur = _CONN.execute(
+            "SELECT status, COUNT(*) FROM reports "
+            "WHERE target = ? AND timestamp >= ? GROUP BY status",
+            (target, cutoff),
+        )
+        counts = {row[0]: row[1] for row in cur.fetchall()}
+    total = sum(counts.values())
+    ok = counts.get("OK", 0)
+    return {
+        "total": total,
+        "ok": ok,
+        "by_status": counts,
+        "uptime_pct": round(ok / total * 100, 1) if total else 0,
+    }
+
+
+def prune_removed_targets(active_targets: list) -> int:
+    """Удаляет отчёты целей, которых больше нет в targets.json."""
+    if not active_targets:
+        return 0
+    placeholders = ",".join("?" * len(active_targets))
+    with _LOCK:
+        cur = _CONN.execute(
+            f"DELETE FROM reports WHERE target NOT IN ({placeholders})",
+            active_targets,
+        )
+        _CONN.commit()
+        return cur.rowcount
+
+
+def get_target_history(target: str, limit: int = 20, offset: int = 0,
+                       node_id: str = None) -> dict:
+    """Постраничная история проверок конкретной цели."""
+    with _LOCK:
+        if node_id:
+            rows = _CONN.execute(
+                "SELECT sig,node_id,target,timestamp,status,latency_ms "
+                "FROM reports WHERE target=? AND node_id=? "
+                "ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (target, node_id, limit, offset),
+            ).fetchall()
+            total = _CONN.execute(
+                "SELECT COUNT(*) FROM reports WHERE target=? AND node_id=?",
+                (target, node_id),
+            ).fetchone()[0]
+        else:
+            rows = _CONN.execute(
+                "SELECT sig,node_id,target,timestamp,status,latency_ms "
+                "FROM reports WHERE target=? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                (target, limit, offset),
+            ).fetchall()
+            total = _CONN.execute(
+                "SELECT COUNT(*) FROM reports WHERE target=?", (target,)
+            ).fetchone()[0]
+
+    reports = [_row_to_report(r) for r in rows]
+    ok_n = sum(1 for r in reports if r["status"] == "OK")
+    lats = [r["latency_ms"] for r in reports if r["latency_ms"] > 0]
+    return {
+        "target": target,
+        "reports": reports,
+        "total": total,
+        "has_more": offset + limit < total,
+        "ok_pct": round(ok_n / len(reports) * 100, 1) if reports else 0,
+        "avg_latency_ms": round(sum(lats) / len(lats)) if lats else None,
+    }
+
+
+def known_node_ids_for_target(target: str) -> list:
+    with _LOCK:
+        rows = _CONN.execute(
+            "SELECT DISTINCT node_id FROM reports WHERE target=?", (target,)
+        ).fetchall()
+    return [r[0] for r in rows]

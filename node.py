@@ -91,13 +91,19 @@ def make_report(node_id: str, priv, target: str) -> dict:
     return report
 
 
-def probe_loop(node_id, priv, targets, interval):
+def probe_loop(node_id, priv, targets_file, interval_getter):
     while True:
+        try:
+            with open(targets_file) as f:
+                targets = json.load(f)["targets"]
+        except Exception as e:
+            log(f"ошибка чтения targets.json: {e}")
+            targets = []
         for target in targets:
             report = make_report(node_id, priv, target)
             storage.insert_report(report)
             log(f"probe {target:<30} -> {report['status']}")
-        time.sleep(interval)
+        time.sleep(interval_getter())
 
 
 # ---------------------------------------------------------------------------
@@ -229,12 +235,20 @@ def status_loop(interval: int):
         print_status()
 
 
-def prune_loop(retention_days: int, interval: int = 3600):
+def prune_loop(config_file: str, default_days: int = 45, interval: int = 3600):
     while True:
         time.sleep(interval)
-        removed = storage.prune_old_reports(retention_days)
+        days = default_days
+        try:
+            with open(config_file) as f:
+                for line in f:
+                    if line.startswith("MESHCANARY_RETENTION_DAYS="):
+                        days = int(line.strip().split("=", 1)[1])
+        except Exception:
+            pass
+        removed = storage.prune_old_reports(days)
         if removed:
-            log(f"очистка: удалено {removed} отчётов старше {retention_days} дн.")
+            log(f"очистка: удалено {removed} отчётов старше {days} дн.")
 
 
 # ---------------------------------------------------------------------------
@@ -288,14 +302,25 @@ def main():
         target=gossip_client_loop, args=(bootstrap_peers, args.gossip_interval), daemon=True
     ).start()
     threading.Thread(target=status_loop, args=(args.status_interval,), daemon=True).start()
-    threading.Thread(target=prune_loop, args=(args.retention_days,), daemon=True).start()
+    threading.Thread(target=prune_loop, args=(os.path.join(os.path.dirname(os.path.abspath(args.db)), "config.env"), args.retention_days), daemon=True).start()
 
     if args.web_port:
-        nodes_file = os.path.join(os.path.dirname(args.db), "dashboard_nodes.json")
-        dashboard.start(args.web_port, args.web_host, node_id, nodes_file)
+        data_dir = os.path.dirname(os.path.abspath(args.db))
+        dashboard.start(
+            port=args.web_port,
+            host=args.web_host,
+            node_id=node_id,
+            nodes_file=os.path.join(data_dir, "dashboard_nodes.json"),
+            join_file=os.path.join(data_dir, "join_requests.json"),
+            config_file=os.path.join(data_dir, "config.env"),
+            targets_file=os.path.abspath(args.targets),
+        )
         log(f"веб-дашборд: http://{args.web_host}:{args.web_port}")
 
-    probe_loop(node_id, priv, targets, args.probe_interval)
+    removed = storage.prune_removed_targets(targets)
+    if removed:
+        log(f"удалено {removed} отчётов для удалённых целей")
+    probe_loop(node_id, priv, args.targets, lambda: args.probe_interval)
 
 
 if __name__ == "__main__":
