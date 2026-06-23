@@ -37,6 +37,8 @@ $IS_ROOT && chown -R "$RUN_USER" "$DIR/data" 2>/dev/null || true
 
 [ -f "$DIR/peers.json" ]   || cp "$DIR/peers.json.example"   "$DIR/peers.json"
 [ -f "$DIR/targets.json" ] || cp "$DIR/targets.json.example" "$DIR/targets.json"
+# Все пользовательские файлы должны принадлежать RUN_USER, а не root
+$IS_ROOT && chown "$RUN_USER" "$DIR/peers.json" "$DIR/targets.json" 2>/dev/null || true
 
 # ─── конфиг ───────────────────────────────────────────────────────────────
 # Значения по умолчанию
