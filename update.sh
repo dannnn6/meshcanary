@@ -39,6 +39,9 @@ echo
 
 read -r -p "Применить обновление? [y/N] " ANS
 case "$ANS" in [yY]*)
+  # Сбрасываем изменения в tracked-файлах — пользовательские данные
+  # хранятся в data/ и *.json (они в .gitignore), поэтому ничего важного не теряется
+  git checkout -- . 2>/dev/null || true
   git merge --ff-only "origin/$BRANCH"
   chmod +x "$DIR/install.sh" "$DIR/update.sh" "$DIR/config.sh" 2>/dev/null || true
 
