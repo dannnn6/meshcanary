@@ -19,11 +19,15 @@ command -v python3 &>/dev/null || { echo "Ошибка: python3 не найде�
 PYVER=$(python3 -c 'import sys; print(".".join(map(str,sys.version_info[:2])))')
 echo "==> Python $PYVER"
 
-if ! python3 -m venv --help &>/dev/null 2>&1; then
+# Проверяем именно создание venv — python3 -m venv --help возвращает 0 даже без ensurepip
+if ! python3 -m venv --without-pip /tmp/_mc_venv_check_$$ &>/dev/null 2>&1; then
+  rm -rf /tmp/_mc_venv_check_$$ 2>/dev/null
   echo "==> Устанавливаю python3-venv..."
   $IS_ROOT || { echo "Нужен sudo: sudo bash install.sh"; exit 1; }
   VENV_PKG="python${PYVER}-venv"
   apt-get install -y "$VENV_PKG" 2>/dev/null || apt-get install -y python3-venv
+else
+  rm -rf /tmp/_mc_venv_check_$$ 2>/dev/null
 fi
 
 echo "==> Создаю .venv"

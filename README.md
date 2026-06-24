@@ -1,6 +1,6 @@
 # Mesh Canary
 
-[Страница проекта](https://dannnn6.github.io/meshcanary/) · MIT license
+[Страница проекта](https://YOUR_USERNAME.github.io/meshcanary/) · MIT license
 
 Распределённая, не имеющая единого центра сеть для мониторинга доступности
 сайтов. Идея: вместо одного сервера, который проверяет «доступен ли сайт X»
