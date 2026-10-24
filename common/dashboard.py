@@ -641,8 +641,6 @@ def _make_handler():
                         removed = data["targets"].pop(idx)
                         with open(_TARGETS_FILE, "w") as f:
                             json.dump(data, f, indent=2)
-                        # удаляем из БД отчёты этой цели
-                        storage.prune_removed_targets(data["targets"])
                 except Exception:
                     pass
                 return self._json({"ok": True})

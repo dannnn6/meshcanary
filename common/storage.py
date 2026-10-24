@@ -185,21 +185,6 @@ def get_target_stats(target: str, hours: int = 24) -> dict:
         "uptime_pct": round(ok / total * 100, 1) if total else 0,
     }
 
-
-def prune_removed_targets(active_targets: list) -> int:
-    """Удаляет отчёты целей, которых больше нет в targets.json."""
-    if not active_targets:
-        return 0
-    placeholders = ",".join("?" * len(active_targets))
-    with _LOCK:
-        cur = _CONN.execute(
-            f"DELETE FROM reports WHERE target NOT IN ({placeholders})",
-            active_targets,
-        )
-        _CONN.commit()
-        return cur.rowcount
-
-
 def get_target_history(target: str, limit: int = 20, offset: int = 0,
                        node_id: str = None) -> dict:
     """Постраничная история проверок конкретной цели."""

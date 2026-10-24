@@ -281,14 +281,14 @@ def main():
         ADVERTISE = (args.advertise_host, args.port)
 
     db_path = args.db or f"meshcanary_{args.port}.db"
+    data_dir = os.path.dirname(os.path.abspath(db_path))
+
     storage.init(db_path)
 
     priv, node_id = crypto.load_or_create_identity(args.id_file)
     log(f"node id: {node_id}")
     log(f"база данных: {db_path}")
 
-    with open(args.targets) as f:
-        targets = json.load(f)["targets"]
     bootstrap_peers = []
     if os.path.exists(args.peers):
         with open(args.peers) as f:
@@ -302,10 +302,13 @@ def main():
         target=gossip_client_loop, args=(bootstrap_peers, args.gossip_interval), daemon=True
     ).start()
     threading.Thread(target=status_loop, args=(args.status_interval,), daemon=True).start()
-    threading.Thread(target=prune_loop, args=(os.path.join(os.path.dirname(os.path.abspath(args.db)), "config.env"), args.retention_days), daemon=True).start()
+    threading.Thread(
+        target=prune_loop,
+        args=(os.path.join(data_dir, "config.env"), args.retention_days),
+        daemon=True
+    ).start()
 
     if args.web_port:
-        data_dir = os.path.dirname(os.path.abspath(args.db))
         dashboard.start(
             port=args.web_port,
             host=args.web_host,
@@ -317,9 +320,7 @@ def main():
         )
         log(f"веб-дашборд: http://{args.web_host}:{args.web_port}")
 
-    removed = storage.prune_removed_targets(targets)
-    if removed:
-        log(f"удалено {removed} отчётов для удалённых целей")
+
     probe_loop(node_id, priv, args.targets, lambda: args.probe_interval)
 
 
