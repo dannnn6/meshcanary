@@ -7,7 +7,6 @@ whitespace) ensures the same logical report always produces the same bytes,
 so a signature stays valid no matter who re-serializes it.
 """
 import json
-import math
 from datetime import datetime, timedelta, timezone
 
 REPORT_FIELDS = ["node_id", "target", "timestamp", "status", "latency_ms"]
@@ -34,7 +33,8 @@ def is_well_formed(report: dict) -> bool:
     if not all(k in report for k in REPORT_FIELDS + ["sig"]):
         return False
 
-    if report["status"] not in VALID_STATUSES:
+    status = report.get("status")
+    if not isinstance(status, str) or status not in VALID_STATUSES:
         return False
 
     node_id = report["node_id"]
