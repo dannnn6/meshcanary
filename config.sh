@@ -5,7 +5,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG="$DIR/data/config.env"
-TARGETS="$DIR/targets.json"
+TARGETS="$DIR/data/targets.json"
 
 # ── загрузка текущего конфига ──────────────────────────────────────────────
 load_config() {
@@ -23,6 +23,7 @@ load_config() {
 save_config() {
   mkdir -p "$DIR/data"
   cat > "$CONFIG" << ENV
+MESHCANARY_ADMIN_PASSWORD=${MESHCANARY_ADMIN_PASSWORD:-}
 MESHCANARY_PORT=$MESHCANARY_PORT
 MESHCANARY_WEB_PORT=$MESHCANARY_WEB_PORT
 MESHCANARY_WEB_HOST=$MESHCANARY_WEB_HOST
@@ -32,6 +33,7 @@ MESHCANARY_PROBE_INTERVAL=$MESHCANARY_PROBE_INTERVAL
 MESHCANARY_GOSSIP_INTERVAL=$MESHCANARY_GOSSIP_INTERVAL
 MESHCANARY_RETENTION_DAYS=$MESHCANARY_RETENTION_DAYS
 ENV
+  chmod 600 "$CONFIG"
   echo "  ✓ Сохранено в $CONFIG"
 }
 

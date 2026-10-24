@@ -1,55 +1,94 @@
+
 #!/usr/bin/env bash
-# Mesh Canary — обновление. Запускай: bash update.sh
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
-chmod +x "$DIR/update.sh" "$DIR/install.sh" "$DIR/config.sh" 2>/dev/null || true
 
+# Проверка репозитория
 if [ ! -d .git ]; then
-  echo "Ошибка: проект не установлен через git clone." >&2; exit 1
+    echo "Ошибка: отсутствует Git-репозиторий" >&2
+    exit 1
 fi
 
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-CURRENT_VERSION="$(cat VERSION 2>/dev/null || echo "unknown")"
-
-echo "==> Текущая версия: $CURRENT_VERSION (ветка $BRANCH)"
-echo "==> Проверяю обновления..."
-git fetch origin "$BRANCH" --quiet
-
-LOCAL_REV="$(git rev-parse HEAD)"
-REMOTE_REV="$(git rev-parse "origin/$BRANCH")"
-
-if [ "$LOCAL_REV" = "$REMOTE_REV" ]; then
-  echo "==> Уже последняя версия."; exit 0
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "Ошибка: есть незакоммиченные изменения" >&2
+    git status --short
+    exit 1
 fi
 
-NEW_VERSION="$(git show "origin/$BRANCH:VERSION" 2>/dev/null || echo "unknown")"
-COMMITS="$(git rev-list --count "HEAD..origin/$BRANCH")"
+BRANCH="$(git symbolic-ref --quiet --short HEAD)" || {
+    echo "Ошибка: HEAD не привязан к ветке" >&2
+    exit 1
+}
 
-echo
-echo "==> Доступно: $CURRENT_VERSION → $NEW_VERSION  ($COMMITS новых коммитов)"
-echo
-echo "--- коммиты ---"
-git log --oneline --no-decorate "HEAD..origin/$BRANCH"
-echo
-echo "--- изменённые файлы ---"
-git --no-pager diff --stat HEAD "origin/$BRANCH"
-echo
+git remote get-url origin >/dev/null
 
-read -r -p "Применить обновление? [y/N] " ANS
-case "$ANS" in [yY]*)
-  # Сбрасываем изменения в tracked-файлах — пользовательские данные
-  # хранятся в data/ и *.json (они в .gitignore), поэтому ничего важного не теряется
-  git checkout -- . 2>/dev/null || true
-  git merge --ff-only "origin/$BRANCH"
-  chmod +x "$DIR/install.sh" "$DIR/update.sh" "$DIR/config.sh" 2>/dev/null || true
+OLD_REV="$(git rev-parse HEAD)"
+echo "Ветка: $BRANCH"
+echo "Получаю обновления..."
+git fetch origin "$BRANCH"
+NEW_REV="$(git rev-parse FETCH_HEAD)"
 
-  echo "==> Обновлено: $CURRENT_VERSION → $NEW_VERSION"
-  if [ -d /run/systemd/system ] && systemctl is-active --quiet meshcanary 2>/dev/null; then
-    sudo systemctl restart meshcanary && echo "==> Нода перезапущена."
-  else
-    echo "==> Перезапусти ноду: sudo systemctl restart meshcanary"
-  fi ;;
-*) echo "==> Отменено." ;;
+if [ "$OLD_REV" = "$NEW_REV" ]; then
+    echo "Уже установлена последняя версия"
+    exit 0
+fi
+
+if ! git merge-base --is-ancestor "$OLD_REV" "$NEW_REV"; then
+    echo "Ошибка: обновление не является fast-forward" >&2
+    exit 1
+fi
+
+if [ ! -x "$DIR/.venv/bin/python3" ]; then
+    echo "Ошибка: .venv отсутствует. Сначала выполните install.sh" >&2
+    exit 1
+fi
+
+if ! git cat-file -e "$NEW_REV:requirements.txt" 2>/dev/null; then
+    echo "Ошибка: в новой версии отсутствует requirements.txt" >&2
+    exit 1
+fi
+
+SERVICE_ACTIVE=false
+if command -v systemctl >/dev/null 2>&1 &&
+   systemctl is-active --quiet meshcanary; then
+    SERVICE_ACTIVE=true
+    sudo -v
+fi
+
+echo "Обновление: ${OLD_REV:0:8} -> ${NEW_REV:0:8}"
+git --no-pager diff --stat "$OLD_REV" "$NEW_REV"
+
+read -r -p "Установить? [y/N] " ANSWER
+case "$ANSWER" in
+    y|Y|yes|YES) ;;
+    *) echo "Отменено"; exit 0 ;;
 esac
+
+git merge --ff-only "$NEW_REV"
+
+# Python-зависимости
+if ! "$DIR/.venv/bin/python3" -m pip install \
+    -r "$DIR/requirements.txt"; then
+    echo "Ошибка обновления зависимостей" >&2
+    exit 1
+fi
+
+# Перезапуск работающей ноды
+if [ "$SERVICE_ACTIVE" = true ]; then
+    sudo systemctl restart meshcanary
+    sleep 2
+
+    if ! systemctl is-active --quiet meshcanary; then
+        echo "Ошибка запуска сервиса" >&2
+        sudo systemctl status meshcanary --no-pager -l || true
+        exit 1
+    fi
+
+    echo "Сервис перезапущен"
+else
+    echo "Сервис не был запущен, перезапуск пропущен"
+fi
+
+echo "Обновлено до $(git rev-parse --short HEAD)"

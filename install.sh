@@ -34,16 +34,34 @@ fi
 echo "==> Создаю .venv"
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install --upgrade pip --quiet
-"$VENV/bin/pip" install cryptography --quiet
+"$VENV/bin/pip" install -r "$DIR/requirements.txt" --quiet
 
 # ─── данные ───────────────────────────────────────────────────────────────
-mkdir -p "$DIR/data"
-$IS_ROOT && chown -R "$RUN_USER" "$DIR/data" 2>/dev/null || true
+DATA_DIR="$DIR/data"
+mkdir -p "$DATA_DIR"
 
-[ -f "$DIR/peers.json" ]   || cp "$DIR/peers.json.example"   "$DIR/peers.json"
-[ -f "$DIR/targets.json" ] || cp "$DIR/targets.json.example" "$DIR/targets.json"
-# Все пользовательские файлы должны принадлежать RUN_USER, а не root
-$IS_ROOT && chown "$RUN_USER" "$DIR/peers.json" "$DIR/targets.json" 2>/dev/null || true
+for name in peers.json targets.json; do
+  old="$DIR/$name"
+  new="$DATA_DIR/$name"
+
+  if [ -f "$old" ] && [ -f "$new" ]; then
+    echo "Ошибка: оба файла существуют: $old и $new" >&2
+    exit 1
+  fi
+
+  if [ -f "$old" ]; then
+    mv "$old" "$new"
+  elif [ ! -f "$new" ]; then
+    cp "$DIR/$name.example" "$new"
+  fi
+done
+
+if $IS_ROOT; then
+  chown -R "$RUN_USER" "$DATA_DIR"
+fi
+
+chmod 700 "$DATA_DIR"
+chmod 600 "$DATA_DIR/peers.json" "$DATA_DIR/targets.json"
 
 # ─── конфиг ───────────────────────────────────────────────────────────────
 # Значения по умолчанию
@@ -124,8 +142,17 @@ print('\n'.join(sorted(ips)))" 2>/dev/null)
   read -r -p "   Порт дашборда [$MC_WEB_PORT]: " V; MC_WEB_PORT="${V:-$MC_WEB_PORT}"
 fi
 
+# Сохраняем существующий пароль либо создаём новый
+if [ -z "${MESHCANARY_ADMIN_PASSWORD:-}" ]; then
+  MESHCANARY_ADMIN_PASSWORD="$(
+    python3 -c 'import secrets; print(secrets.token_hex(24))'
+  )"
+  echo "==> Создан пароль администратора"
+fi
+
 # Пишем config.env
 cat > "$CONFIG" << ENV
+MESHCANARY_ADMIN_PASSWORD=$MESHCANARY_ADMIN_PASSWORD
 MESHCANARY_PORT=$MC_PORT
 MESHCANARY_WEB_PORT=$MC_WEB_PORT
 MESHCANARY_WEB_HOST=$MC_WEB_HOST
@@ -135,6 +162,7 @@ MESHCANARY_PROBE_INTERVAL=$MC_PROBE
 MESHCANARY_GOSSIP_INTERVAL=$MC_GOSSIP
 MESHCANARY_RETENTION_DAYS=$MC_RETAIN
 ENV
+chmod 600 "$CONFIG"
 $IS_ROOT && chown "$RUN_USER" "$CONFIG" 2>/dev/null || true
 echo "==> Конфиг записан: $CONFIG"
 
@@ -144,13 +172,14 @@ cat > "$DIR/run-node.sh" << 'RUNNER'
 set -euo pipefail
 D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$D/data/config.env" ] && source "$D/data/config.env"
+export MESHCANARY_ADMIN_PASSWORD
 
 ARGS=(
   --port    "${MESHCANARY_PORT:-9001}"
   --id-file "$D/data/node.key"
   --db      "$D/data/node.db"
-  --targets "$D/targets.json"
-  --peers   "$D/peers.json"
+  --targets "$D/data/targets.json"
+  --peers   "$D/data/peers.json"
   --web-host  "${MESHCANARY_WEB_HOST:-127.0.0.1}"
   --web-port  "${MESHCANARY_WEB_PORT:-8080}"
   --probe-interval  "${MESHCANARY_PROBE_INTERVAL:-30}"
