@@ -31,7 +31,8 @@ from common import crypto, models, protocol, storage, dashboard
 
 ADVERTISE = None  # (host, port) this node tells peers to reach it on, or None
 GOSSIP_WINDOW_SECONDS = 30 * 60  # how far back to re-send reports each gossip round
-
+GOSSIP_TIMEOUT = 10.0
+MAX_GOSSIP_CONNECTIONS = 32
 
 def log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
@@ -140,7 +141,7 @@ def build_peer_sample(sample_size: int = 20) -> list:
     return sample
 
 
-def handle_peer_connection(conn):
+def handle_peer_connection(conn, slots):
     try:
         msg = protocol.recv_json(conn)
         if msg.get("type") != "reports":
@@ -161,22 +162,42 @@ def handle_peer_connection(conn):
         log(f"gossip: ошибка соединения: {e}")
     finally:
         conn.close()
+        slots.release()
 
 
 def gossip_server(listen_port: int):
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", listen_port))
-    server.listen(20)
-    log(f"gossip-сервер слушает порт {listen_port}")
-    while True:
-        conn, _ = server.accept()
-        threading.Thread(target=handle_peer_connection, args=(conn,), daemon=True).start()
+    slots = threading.BoundedSemaphore(MAX_GOSSIP_CONNECTIONS)
 
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("0.0.0.0", listen_port))
+        server.listen(20)
+
+        log(f"gossip-сервер слушает порт {listen_port}")
+
+        while True:
+            conn, _ = server.accept()
+            conn.settimeout(GOSSIP_TIMEOUT)
+
+            if not slots.acquire(blocking=False):
+                conn.close()
+                continue
+
+            try:
+                threading.Thread(
+                    target=handle_peer_connection,
+                    args=(conn, slots),
+                    daemon=True,
+                ).start()
+            except Exception:
+                conn.close()
+                slots.release()
+                raise
 
 def gossip_with_peer(host: str, port: int):
     try:
-        with socket.create_connection((host, port), timeout=5) as sock:
+        with socket.create_connection((host, port),timeout=GOSSIP_TIMEOUT,) as sock:
+            sock.settimeout(GOSSIP_TIMEOUT)
             protocol.send_json(
                 sock,
                 {
