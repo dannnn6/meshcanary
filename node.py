@@ -124,14 +124,34 @@ def merge_reports(incoming: list) -> int:
 
 
 def merge_peers(incoming_peers: list) -> None:
-    for p in incoming_peers:
-        host, port = p.get("host"), p.get("port")
-        if not host or not isinstance(port, int):
-            continue
-        if ADVERTISE and (host, port) == ADVERTISE:
-            continue  # don't add ourselves
-        storage.remember_peer(host, port)
+    if not isinstance(incoming_peers, list):
+        return
 
+    for peer in incoming_peers:
+        if not isinstance(peer, dict):
+            continue
+
+        host = peer.get("host")
+        port = peer.get("port")
+
+        if not isinstance(host, str):
+            continue
+
+        if (
+            not host
+            or len(host) > 253
+            or any(c.isspace() or ord(c) < 32 for c in host)
+            or any(c in host for c in "/\\@?#")
+        ):
+            continue
+
+        if type(port) is not int or not 1 <= port <= 65535:
+            continue
+
+        if ADVERTISE and (host, port) == ADVERTISE:
+            continue
+
+        storage.remember_peer(host, port)
 
 def build_peer_sample(sample_size: int = 20) -> list:
     known = storage.known_peers()
@@ -141,10 +161,18 @@ def build_peer_sample(sample_size: int = 20) -> list:
     return sample
 
 
+def valid_gossip_message(message: object) -> bool:
+    return (
+        isinstance(message, dict)
+        and message.get("type") == "reports"
+        and isinstance(message.get("reports"), list)
+        and isinstance(message.get("peers"), list)
+    )
+
 def handle_peer_connection(conn, slots):
     try:
         msg = protocol.recv_json(conn)
-        if msg.get("type") != "reports":
+        if not valid_gossip_message(msg):
             return
         new_reports = merge_reports(msg.get("reports", []))
         merge_peers(msg.get("peers", []))
@@ -207,6 +235,8 @@ def gossip_with_peer(host: str, port: int):
                 },
             )
             reply = protocol.recv_json(sock)
+            if not valid_gossip_message(reply):
+                raise ValueError("Некорректный gossip-ответ")
             new_reports = merge_reports(reply.get("reports", []))
             merge_peers(reply.get("peers", []))
             storage.remember_peer(host, port)  # confirmed alive

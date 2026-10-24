@@ -221,6 +221,9 @@ code{font-family:var(--ff);font-size:13px;color:var(--dim)}
     <h3>Добавить ноду в хаб</h3>
     <div class="row">
       <input id="nurl" placeholder="http://1.2.3.4:8080" style="min-width:220px"/>
+      <input id="my-url"
+       placeholder="Публичный URL этого узла"
+       style="min-width:220px"/>
       <input id="nlabel" placeholder="Название (необязательно)" style="max-width:220px"/>
       <button onclick="requestJoin()">Запросить подключение</button>
     </div>
@@ -233,8 +236,10 @@ code{font-family:var(--ff);font-size:13px;color:var(--dim)}
   <div class="panel">
     <h3>Входящие запросы на подключение</h3>
     <p style="color:var(--dim);font-size:14px;margin-bottom:16px">
-      При подтверждении эта нода появится в хабе запрашивающей, а она — в вашем хабе.
-    </p>
+     Подтверждение добавит запрашивающий узел в ваш хаб.
+     Для взаимного подключения отправьте запрос со своего узла
+     и подтвердите его на другой стороне.
+   </p>
     <div id="req-list"><span style="color:var(--dim)">Нет запросов</span></div>
   </div>
 </div>
@@ -350,12 +355,22 @@ async function loadHubNodes(){
 async function requestJoin(){
   const url=document.getElementById('nurl').value.trim();
   const label=document.getElementById('nlabel').value.trim()||url;
+  const myUrl = document.getElementById('my-url').value.trim();
+
+  if (!/^https?:\/\/[^/?#]+\/?$/.test(myUrl)) {
+    alert('Укажи корректный URL своего узла');
+    return;
+  }
   if(!url)return;
   const msg=document.getElementById('join-msg');
   msg.style.color='var(--dim)';msg.textContent='Отправляю...';
   const res=await fetch('/api/request-join',{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({target_url:url,my_label:label})});
+    body: JSON.stringify({
+    target_url: url,
+    my_url: myUrl,
+    my_label: 'Узел ' + location.hostname
+  })
   const d=await res.json();
   if(d.ok){
     msg.style.color='var(--ok)';
@@ -542,10 +557,27 @@ def _make_handler():
             if p == "/api/request-join":
                 target_url = body.get("target_url", "").rstrip("/")
                 my_label = body.get("my_label", _NODE_ID[:12] + "…")
-                if not target_url:
-                    return self._json({"ok": False, "error": "нет target_url"})
+                from urllib.parse import urlsplit
+
+                my_url = body.get("my_url", "").rstrip("/")
+
+                for url in (target_url, my_url):
+                    parsed = urlsplit(url)
+                    if (
+                            parsed.scheme not in ("http", "https")
+                            or not parsed.hostname
+                            or parsed.username
+                            or parsed.password
+                            or parsed.path not in ("", "/")
+                            or parsed.query
+                            or parsed.fragment
+                    ):
+                        return self._json({
+                            "ok": False,
+                            "error": "Некорректный URL узла",
+                        })
                 result = _post_remote(target_url, "/api/receive-join-request", {
-                    "url": body.get("my_url", ""),
+                    "url": my_url,
                     "label": my_label,
                     "node_id": _NODE_ID,
                 })
@@ -566,7 +598,9 @@ def _make_handler():
                             "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
                         })
                         _save_json(_JOIN_FILE, reqs)
-                return self._json({"ok": True})
+                return self._json({
+                    "ok": bool(url),
+                })
 
             if p == "/api/approve-join":
                 idx = body.get("index", -1)
@@ -580,10 +614,7 @@ def _make_handler():
                             if not any(n["url"] == req["url"] for n in nodes):
                                 nodes.append({"url": req["url"], "label": req.get("label", req["url"])})
                                 _save_json(_NODES_FILE, nodes)
-                        _post_remote(req["url"], "/api/join-confirmed", {
-                            "url": body.get("my_url", ""),
-                            "label": _NODE_ID[:12] + "…",
-                        })
+
                         return self._json({"ok": True})
                 return self._json({"ok": False})
 
