@@ -14,6 +14,9 @@ import urllib.request
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import storage
+import base64
+import binascii
+import hmac
 
 _NODE_ID = ""
 _NODES_FILE = ""
@@ -22,6 +25,7 @@ _CONFIG_FILE = ""
 _TARGETS_FILE = ""
 _NODES_LOCK = threading.Lock()
 _JOIN_LOCK = threading.Lock()
+_ADMIN_PASSWORD = ""
 
 LIMIT = 25
 
@@ -481,6 +485,10 @@ def _make_handler():
         def log_message(self, *a): pass
 
         def do_GET(self):
+            if self.path.split("?", 1)[0] != "/api/status":
+                if not self._authorized():
+                    return
+
             p = self.path.split("?")[0]
             qs = self.path[len(p)+1:] if "?" in self.path else ""
             params = dict(x.split("=", 1) for x in qs.split("&") if "=" in x)
@@ -516,6 +524,10 @@ def _make_handler():
             self._send(_HTML.encode(), "text/html; charset=utf-8")
 
         def do_POST(self):
+            if self.path.split("?", 1)[0] != "/api/receive-join-request":
+                if not self._authorized():
+                    return
+
             body = self._body()
             p = self.path
 
@@ -620,6 +632,9 @@ def _make_handler():
             self._json({"ok": False})
 
         def do_DELETE(self):
+            if not self._authorized():
+                return
+
             body = self._body()
             p = self.path
 
@@ -647,6 +662,33 @@ def _make_handler():
 
             self._json({"ok": False})
 
+        def _authorized(self) -> bool:
+            header = self.headers.get("Authorization", "")
+
+            if header.startswith("Basic "):
+                try:
+                    credentials = base64.b64decode(
+                        header[6:], validate=True
+                    ).decode("utf-8")
+                    username, password = credentials.split(":", 1)
+                except (ValueError, UnicodeError, binascii.Error):
+                    pass
+                else:
+                    if (
+                            hmac.compare_digest(username, "admin")
+                            and hmac.compare_digest(password, _ADMIN_PASSWORD)
+                    ):
+                        return True
+
+            self.send_response(401)
+            self.send_header(
+                "WWW-Authenticate",
+                'Basic realm="Mesh Canary", charset="UTF-8"',
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
         def _body(self) -> dict:
             n = int(self.headers.get("Content-Length", 0))
             return json.loads(self.rfile.read(n)) if n else {}
@@ -666,12 +708,22 @@ def _make_handler():
 
 def start(port: int, host: str, node_id: str, nodes_file: str,
           join_file: str = "", config_file: str = "", targets_file: str = ""):
-    global _NODE_ID, _NODES_FILE, _JOIN_FILE, _CONFIG_FILE, _TARGETS_FILE
+    global _NODE_ID, _NODES_FILE, _JOIN_FILE, _CONFIG_FILE, _TARGETS_FILE, _ADMIN_PASSWORD
     _NODE_ID = node_id
     _NODES_FILE = nodes_file
     _JOIN_FILE = join_file
     _CONFIG_FILE = config_file
     _TARGETS_FILE = targets_file
     server = ThreadingHTTPServer((host, port), _make_handler())
+
+    _ADMIN_PASSWORD = os.environ.get(
+        "MESHCANARY_ADMIN_PASSWORD", ""
+    )
+
+    if not _ADMIN_PASSWORD:
+        raise ValueError(
+            "Пароль не задан!"
+        )
+
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
