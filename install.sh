@@ -36,6 +36,10 @@ python3 -m venv "$VENV"
 "$VENV/bin/pip" install --upgrade pip --quiet
 "$VENV/bin/pip" install -r "$DIR/requirements.txt" --quiet
 
+if $IS_ROOT; then
+  chown -R "$RUN_USER" "$VENV"
+fi
+
 # ─── данные ───────────────────────────────────────────────────────────────
 DATA_DIR="$DIR/data"
 mkdir -p "$DATA_DIR"
@@ -73,7 +77,7 @@ MC_MODE=full
 MC_PROBE=30
 MC_GOSSIP=15
 MC_RETAIN=45
-
+umask 077
 # Подгружаем существующий конфиг (переустановка не сбросит настройки)
 if [ -f "$CONFIG" ]; then
   source "$CONFIG"
@@ -193,6 +197,9 @@ exec "$D/.venv/bin/python3" "$D/node.py" "${ARGS[@]}" "$@"
 RUNNER
 chmod +x "$DIR/run-node.sh"
 
+if $IS_ROOT; then
+  chown "$RUN_USER" "$DIR/run-node.sh"
+fi
 # ─── systemd ──────────────────────────────────────────────────────────────
 if [ -d /run/systemd/system ]; then
   if ! $IS_ROOT; then
